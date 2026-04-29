@@ -2,6 +2,8 @@
 
 Automated AWS EC2 governance project built with Python, Terraform, AWS Lambda, EventBridge, SNS, Slack, and S3.
 
+![Architectture](./images/architecture.png)
+
 ## Overview
 
 This project scans EC2 instances in `us-west-2`, evaluates their state, creates EBS snapshots for approved states, optionally terminates approved instances, generates a CSV report, uploads that report to S3, and sends notifications by email and Slack.
@@ -99,6 +101,10 @@ Before running the project, make sure you have:
 - An existing S3 bucket for CSV reports
 - An SNS topic with a confirmed email subscription
 - A Slack incoming webhook
+
+![Email Notification](./images/enotification.png)
+
+![Email Validation](./images/evalidation.png)
 
 ## Required AWS Resources
 
@@ -204,7 +210,7 @@ terraform init
 terraform apply
 ```
 
-Type `yes` when Terraform asks for confirmation.
+![Terraform Apply](./images/tfapply.png)
 
 ## Manual Test Workflow
 
@@ -240,6 +246,10 @@ Check the following:
 - S3 bucket for the generated CSV file
 - CloudWatch Logs for Lambda execution logs
 - EC2 console for snapshot and termination behavior
+
+![Slack Message](./images/slack.png)
+
+![Email Message](./images/gmail.png)
 
 ## Where the CSV Report Goes
 
