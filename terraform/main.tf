@@ -46,7 +46,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
 resource "aws_lambda_function" "this" {
   function_name    = "ec2-governance-engine"
   filename         = "../lambda/package.zip"
-  source_code_hash = filebase64sha256("../lambda/package.zip")
+  source_code_hash = fileexists("../lambda/package.zip") ? filebase64sha256("../lambda/package.zip") : null
   handler          = "lambda_function.lambda_handler"
   runtime          = "python3.11"
   role             = aws_iam_role.lambda_role.arn
