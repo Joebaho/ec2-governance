@@ -1,0 +1,7 @@
+sns_topic_arn = "arn:aws:sns:us-west-2:123456789012:ec2-governance-report"
+slack_webhook = "https://hooks.slack.com/services/REPLACE/THIS/WITH_YOUR_WEBHOOK"
+report_bucket_name = "your-report-bucket-name"
+
+# Snapshot and terminate only the instance states you approve.
+snapshot_states  = "stopped"
+terminate_states = "stopped"

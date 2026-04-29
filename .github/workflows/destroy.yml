@@ -1,0 +1,38 @@
+name: Destroy EC2 Governance
+
+on:
+  workflow_dispatch:
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-west-2
+      TF_VAR_sns_topic_arn: ${{ secrets.SNS_TOPIC_ARN }}
+      TF_VAR_slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+      TF_VAR_report_bucket_name: ${{ secrets.REPORT_BUCKET_NAME }}
+      TF_VAR_snapshot_states: stopped
+      TF_VAR_terminate_states: stopped
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve
+        working-directory: terraform
