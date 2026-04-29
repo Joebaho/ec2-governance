@@ -42,22 +42,32 @@ def lambda_handler(event, context):
         policy = evaluate_policy(state, launch_time, tags)
         snapshot_status = "NOT_REQUESTED"
         termination_status = "NOT_REQUESTED"
+        action_error = ""
 
-        if policy["snapshot"]:
-            snapshot_count = create_snapshots(instance_id)
-            snapshot_status = f"CREATED_{snapshot_count}_SNAPSHOT(S)"
+        try:
+            if policy["snapshot"]:
+                snapshot_count = create_snapshots(instance_id)
+                snapshot_status = f"CREATED_{snapshot_count}_SNAPSHOT(S)"
 
-        if policy["terminate"]:
-            terminate_instance(instance_id)
-            termination_status = "TERMINATION_REQUESTED"
+            if policy["terminate"]:
+                terminate_instance(instance_id)
+                termination_status = "TERMINATION_REQUESTED"
+        except Exception as exc:
+            action_error = str(exc)
+            logger.exception("Failed to process governance action for instance %s", instance_id)
+            if policy["snapshot"] and snapshot_status == "NOT_REQUESTED":
+                snapshot_status = "FAILED"
+            if policy["terminate"] and termination_status == "NOT_REQUESTED":
+                termination_status = "FAILED"
 
         summary[state] = summary.get(state, 0) + 1
-        if policy["snapshot"] or policy["terminate"]:
+        if policy["snapshot"] or policy["terminate"] or action_error:
             actions_taken.append(build_action_line(
                 instance_id,
                 name,
                 snapshot_status,
-                termination_status
+                termination_status,
+                action_error
             ))
 
         report.append({
@@ -65,7 +75,7 @@ def lambda_handler(event, context):
             "Name": name,
             "State": state,
             "Action": policy["action"],
-            "Reason": policy["reason"],
+            "Reason": build_reason(policy["reason"], action_error),
             "SnapshotStatus": snapshot_status,
             "TerminationStatus": termination_status,
             "LaunchTime": launch_time.isoformat() if launch_time else "",
@@ -278,7 +288,13 @@ def build_email_message(slack_message, csv_report, report_link, upload_error):
     return f"{slack_message}Full CSV Report\n{csv_report}"
 
 
-def build_action_line(instance_id, name, snapshot_status, termination_status):
+def build_reason(reason, action_error):
+    if action_error:
+        return f"{reason}. Action error: {action_error}"
+    return reason
+
+
+def build_action_line(instance_id, name, snapshot_status, termination_status, action_error):
     name_suffix = f" ({name})" if name else ""
     details = []
 
@@ -288,6 +304,14 @@ def build_action_line(instance_id, name, snapshot_status, termination_status):
 
     if termination_status == "TERMINATION_REQUESTED":
         details.append("termination requested")
+    elif termination_status == "FAILED":
+        details.append("termination failed")
+
+    if snapshot_status == "FAILED":
+        details.append("snapshot failed")
+
+    if action_error:
+        details.append(f"error: {action_error}")
 
     if not details:
         details.append("action recorded")
