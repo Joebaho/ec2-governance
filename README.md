@@ -294,6 +294,8 @@ Important:
 - Resources not created by Terraform are not destroyed automatically
 - If your SNS topic or report bucket were created outside Terraform, they will remain
 
+![Terraform Destroy](./images/tfdestroy.png)
+
 ## GitHub Actions
 
 This repo includes two workflows:
