@@ -3,12 +3,15 @@ import csv
 import io
 import os
 import json
+import logging
 import urllib3
 from datetime import datetime, timezone, timedelta
 
 ec2 = boto3.client('ec2')
 sns = boto3.client('sns')
 s3 = boto3.client('s3')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN")
@@ -70,14 +73,39 @@ def lambda_handler(event, context):
         })
 
     csv_report = generate_csv(report)
-    report_link = upload_report_to_s3(csv_report, scan_time)
-    slack_message = build_slack_message(summary, actions_taken, len(report), scan_time, report_link)
-    email_message = build_email_message(slack_message, csv_report, report_link)
+    report_link = ""
+    upload_error = ""
 
-    send_sns(email_message)
-    send_slack(slack_message)
+    try:
+        report_link = upload_report_to_s3(csv_report, scan_time)
+        if report_link:
+            logger.info("Uploaded CSV report to S3 successfully")
+        else:
+            logger.warning("CSV report upload skipped because REPORT_BUCKET_NAME is empty")
+    except Exception as exc:
+        upload_error = str(exc)
+        logger.exception("Failed to upload CSV report to S3")
 
-    return {"statusCode": 200}
+    slack_message = build_slack_message(
+        summary,
+        actions_taken,
+        len(report),
+        scan_time,
+        report_link,
+        upload_error
+    )
+    email_message = build_email_message(slack_message, csv_report, report_link, upload_error)
+
+    sns_sent = send_sns(email_message)
+    slack_sent = send_slack(slack_message)
+
+    return {
+        "statusCode": 200,
+        "reportLinkGenerated": bool(report_link),
+        "snsSent": sns_sent,
+        "slackSent": slack_sent,
+        "uploadError": upload_error
+    }
 
 
 def get_all_instances():
@@ -196,7 +224,7 @@ def build_report_key(scan_time):
     return f"reports/ec2-governance-report-{safe_timestamp}.csv"
 
 
-def build_slack_message(summary, actions_taken, instance_count, scan_time, report_link):
+def build_slack_message(summary, actions_taken, instance_count, scan_time, report_link, upload_error):
     summary_lines = []
     for state in ["running", "stopped", "pending", "stopping", "shutting-down", "terminated"]:
         if state in summary:
@@ -209,11 +237,12 @@ def build_slack_message(summary, actions_taken, instance_count, scan_time, repor
         summary_lines.append(f"- {state.capitalize()}: {summary[state]}")
 
     action_lines = actions_taken or ["- No snapshot or termination actions were required"]
-    report_line = (
-        f"Download full CSV report: {report_link}\n\n"
-        if report_link else
-        "Full CSV report link unavailable.\n\n"
-    )
+    if report_link:
+        report_line = f"Download full CSV report: {report_link}\n\n"
+    elif upload_error:
+        report_line = f"Full CSV report link unavailable. S3 upload error: {upload_error}\n\n"
+    else:
+        report_line = "Full CSV report link unavailable.\n\n"
 
     return (
         "CloudSpace EC2 Governance Report\n"
@@ -233,11 +262,17 @@ def build_slack_message(summary, actions_taken, instance_count, scan_time, repor
     )
 
 
-def build_email_message(slack_message, csv_report, report_link):
+def build_email_message(slack_message, csv_report, report_link, upload_error):
     if report_link:
         return (
             f"{slack_message}"
             f"CSV Download Link: {report_link}\n\n"
+            f"Full CSV Report\n{csv_report}"
+        )
+    if upload_error:
+        return (
+            f"{slack_message}"
+            f"S3 Upload Error: {upload_error}\n\n"
             f"Full CSV Report\n{csv_report}"
         )
     return f"{slack_message}Full CSV Report\n{csv_report}"
@@ -262,18 +297,37 @@ def build_action_line(instance_id, name, snapshot_status, termination_status):
 
 def send_sns(message):
     if SNS_TOPIC_ARN:
-        sns.publish(
-            TopicArn=SNS_TOPIC_ARN,
-            Subject="EC2 Governance Report",
-            Message=message
-        )
+        try:
+            sns.publish(
+                TopicArn=SNS_TOPIC_ARN,
+                Subject="EC2 Governance Report",
+                Message=message
+            )
+            logger.info("SNS notification sent successfully")
+            return True
+        except Exception:
+            logger.exception("Failed to send SNS notification")
+            return False
+    logger.warning("SNS notification skipped because SNS_TOPIC_ARN is empty")
+    return False
 
 
 def send_slack(message):
     if SLACK_WEBHOOK:
-        http.request(
-            "POST",
-            SLACK_WEBHOOK,
-            body=json.dumps({"text": message}),
-            headers={"Content-Type": "application/json"}
-        )
+        try:
+            response = http.request(
+                "POST",
+                SLACK_WEBHOOK,
+                body=json.dumps({"text": message}),
+                headers={"Content-Type": "application/json"}
+            )
+            if response.status >= 400:
+                logger.error("Slack webhook returned status %s", response.status)
+                return False
+            logger.info("Slack notification sent successfully")
+            return True
+        except Exception:
+            logger.exception("Failed to send Slack notification")
+            return False
+    logger.warning("Slack notification skipped because SLACK_WEBHOOK is empty")
+    return False
